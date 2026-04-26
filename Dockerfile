@@ -28,7 +28,9 @@ COPY --from=build /usr/local/share/xray /usr/local/share/xray
 
 COPY . /code
 
-RUN ln -s /code/marzban-cli.py /usr/bin/marzban-cli \
+# APScheduler imports pkg_resources (from setuptools) during marzban-cli import.
+RUN python3 -m pip install --no-cache-dir "setuptools>=69.0.0" \
+    && ln -s /code/marzban-cli.py /usr/bin/marzban-cli \
     && chmod +x /usr/bin/marzban-cli \
     && marzban-cli completion install --shell bash
 
