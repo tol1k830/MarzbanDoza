@@ -142,7 +142,11 @@ class XRayConfig(dict):
 
     def _resolve_inbounds(self):
         for inbound in self['inbounds']:
-            if not inbound['protocol'] in ProxyTypes._value2member_map_:
+            # Xray JSON uses "hysteria" for Hysteria2; do not rewrite inbound (Xray only accepts
+            # "hysteria"). Map to Marzban proxy type "hysteria2" for the API / panel.
+            _raw = inbound.get("protocol")
+            proto = "hysteria2" if _raw == "hysteria" else _raw
+            if proto not in ProxyTypes._value2member_map_:
                 continue
 
             if inbound['tag'] in XRAY_EXCLUDE_INBOUND_TAGS:
@@ -152,13 +156,13 @@ class XRayConfig(dict):
                 inbound['settings'] = {}
 
             # hysteria2 uses 'users' list, not 'clients'
-            if inbound['protocol'] == 'hysteria2':
+            if proto == 'hysteria2':
                 if not inbound['settings'].get('users'):
                     inbound['settings']['users'] = []
 
                 settings = {
                     "tag": inbound["tag"],
-                    "protocol": inbound["protocol"],
+                    "protocol": proto,
                     "port": inbound.get("port"),
                     "network": "tcp",
                     "tls": "tls",
@@ -176,12 +180,28 @@ class XRayConfig(dict):
                         if sni:
                             settings["sni"] = [sni] if isinstance(sni, str) else sni
 
+                # Typical Xray Hysteria2: TLS is under streamSettings, not top-level "tls"
+                if not settings["sni"] and (stream := inbound.get("streamSettings")):
+                    if stream.get("security") == "tls" and (tls_settings := stream.get("tlsSettings") or {}):
+                        for certificate in tls_settings.get("certificates", []):
+                            if certificate.get("certificateFile", None):
+                                with open(certificate['certificateFile'], 'rb') as file:
+                                    cert = file.read()
+                                    settings['sni'].extend(get_cert_SANs(cert))
+                            if certificate.get("certificate", None):
+                                cert = certificate['certificate']
+                                if isinstance(cert, list):
+                                    cert = '\n'.join(cert)
+                                if isinstance(cert, str):
+                                    cert = cert.encode()
+                                settings['sni'].extend(get_cert_SANs(cert))
+
                 self.inbounds.append(settings)
                 self.inbounds_by_tag[inbound['tag']] = settings
                 try:
-                    self.inbounds_by_protocol[inbound['protocol']].append(settings)
+                    self.inbounds_by_protocol[proto].append(settings)
                 except KeyError:
-                    self.inbounds_by_protocol[inbound['protocol']] = [settings]
+                    self.inbounds_by_protocol[proto] = [settings]
                 continue
 
             if not inbound['settings'].get('clients'):
