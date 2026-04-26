@@ -49,10 +49,10 @@ class SingBoxConfiguration(str):
         self.config["outbounds"].append(outbound_data)
 
     def render(self, reverse=False):
-        urltest_types = ["vmess", "vless", "trojan", "shadowsocks"]
+        urltest_types = ["vmess", "vless", "trojan", "shadowsocks", "hysteria2"]
         urltest_tags = [outbound["tag"]
                         for outbound in self.config["outbounds"] if outbound["type"] in urltest_types]
-        selector_types = ["vmess", "vless", "trojan", "shadowsocks", "urltest"]
+        selector_types = ["vmess", "vless", "trojan", "shadowsocks", "hysteria2", "urltest"]
         selector_tags = [outbound["tag"]
                          for outbound in self.config["outbounds"] if outbound["type"] in selector_types]
 
@@ -290,6 +290,30 @@ class SingBoxConfiguration(str):
 
         # not supported by sing-box
         if net in ("kcp", "splithttp", "xhttp") or (net == "quic" and inbound["header_type"] != "none"):
+            return
+
+        # hysteria2 handled separately — no streamSettings
+        if inbound['protocol'] == 'hysteria2':
+            sni_list = inbound.get('sni') or []
+            sni = sni_list[0] if sni_list else ''
+            remark = self._remark_validation(remark)
+            self.proxy_remarks.append(remark)
+            port = inbound['port']
+            if isinstance(port, str):
+                port = int(port.split(',')[0])
+            outbound = {
+                'type': 'hysteria2',
+                'tag': remark,
+                'server': address,
+                'server_port': port,
+                'password': settings['password'],
+                'tls': {
+                    'enabled': True,
+                    'server_name': sni,
+                    'insecure': bool(inbound.get('ais', False)),
+                },
+            }
+            self.add_outbound(outbound)
             return
 
         if net in ("grpc", "gun"):

@@ -150,6 +150,40 @@ class XRayConfig(dict):
 
             if not inbound.get('settings'):
                 inbound['settings'] = {}
+
+            # hysteria2 uses 'users' list, not 'clients'
+            if inbound['protocol'] == 'hysteria2':
+                if not inbound['settings'].get('users'):
+                    inbound['settings']['users'] = []
+
+                settings = {
+                    "tag": inbound["tag"],
+                    "protocol": inbound["protocol"],
+                    "port": inbound.get("port"),
+                    "network": "tcp",
+                    "tls": "tls",
+                    "sni": [],
+                    "host": [],
+                    "path": "",
+                    "header_type": "",
+                    "is_fallback": False,
+                }
+
+                # extract SNI from TLS settings if present
+                if tls_settings := inbound.get("tls", {}):
+                    if isinstance(tls_settings, dict):
+                        sni = tls_settings.get("sni") or tls_settings.get("serverName")
+                        if sni:
+                            settings["sni"] = [sni] if isinstance(sni, str) else sni
+
+                self.inbounds.append(settings)
+                self.inbounds_by_tag[inbound['tag']] = settings
+                try:
+                    self.inbounds_by_protocol[inbound['protocol']].append(settings)
+                except KeyError:
+                    self.inbounds_by_protocol[inbound['protocol']] = [settings]
+                continue
+
             if not inbound['settings'].get('clients'):
                 inbound['settings']['clients'] = []
 
@@ -400,7 +434,12 @@ class XRayConfig(dict):
                     continue
 
                 for inbound in inbounds:
-                    clients = config.get_inbound(inbound['tag'])['settings']['clients']
+                    inbound_config = config.get_inbound(inbound['tag'])
+                    # hysteria2 uses 'users' list, other protocols use 'clients'
+                    if proxy_type == 'hysteria2':
+                        clients = inbound_config['settings']['users']
+                    else:
+                        clients = inbound_config['settings']['clients']
 
                     for row in rows:
                         user_id, username, settings, excluded_inbound_tags = row
@@ -408,10 +447,13 @@ class XRayConfig(dict):
                         if excluded_inbound_tags and inbound['tag'] in excluded_inbound_tags:
                             continue
 
-                        client = {
-                            "email": f"{user_id}.{username}",
-                            **settings
-                        }
+                        if proxy_type == 'hysteria2':
+                            client = {"password": settings.get("password", "")}
+                        else:
+                            client = {
+                                "email": f"{user_id}.{username}",
+                                **settings
+                            }
 
                         # XTLS currently only supports transmission methods of TCP and mKCP
                         if client.get('flow') and (

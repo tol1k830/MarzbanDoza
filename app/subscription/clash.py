@@ -291,6 +291,26 @@ class ClashConfiguration(object):
             node['password'] = settings['password']
             node['cipher'] = settings['method']
 
+        elif inbound['protocol'] == 'hysteria2':
+            proxy_remark = self._remark_validation(remark)
+            sni_list = inbound.get('sni') or []
+            sni = sni_list[0] if sni_list else ''
+            hy2_node = {
+                'name': proxy_remark,
+                'type': 'hysteria2',
+                'server': address,
+                'port': inbound['port'],
+                'password': settings['password'],
+                'udp': True,
+            }
+            if sni:
+                hy2_node['sni'] = sni
+            if inbound.get('ais'):
+                hy2_node['skip-cert-verify'] = True
+            self.data['proxies'].append(hy2_node)
+            self.proxy_remarks.append(proxy_remark)
+            return
+
         else:
             return
 

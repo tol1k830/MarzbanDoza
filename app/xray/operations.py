@@ -56,11 +56,52 @@ def _alter_inbound_user(api: XRayAPI, inbound_tag: str, account: Account):
         pass
 
 
+def _get_hysteria2_inbound_tags() -> set:
+    """Return the set of inbound tags that belong to hysteria2 protocol."""
+    return {
+        s['tag']
+        for s in xray.config.inbounds_by_protocol.get('hysteria2', [])
+    }
+
+
+@threaded_function
+def _restart_hysteria2_cores(config):
+    """Restart main core and only nodes that have hysteria2 inbounds configured."""
+    h2_tags = _get_hysteria2_inbound_tags()
+    if not h2_tags:
+        return
+
+    # restart main core if it has hysteria2 inbounds
+    try:
+        xray.core.restart(config)
+        logger.info("Restarted main Xray core for hysteria2 user change")
+    except Exception as e:
+        logger.error(f"Failed to restart main Xray core: {e}")
+
+    # restart only nodes whose config contains at least one hysteria2 inbound tag
+    for node_id, node in list(xray.nodes.items()):
+        if not (node.connected and node.started):
+            continue
+        try:
+            node_inbound_tags = set(xray.config.inbounds_by_tag.keys())
+            if node_inbound_tags & h2_tags:
+                node.restart(config)
+                logger.info(f"Restarted node {node_id} for hysteria2 user change")
+        except Exception as e:
+            logger.error(f"Failed to restart node {node_id}: {e}")
+
+
 def add_user(dbuser: "DBUser"):
     user = UserResponse.model_validate(dbuser)
     email = f"{dbuser.id}.{dbuser.username}"
+    has_hysteria2 = False
 
     for proxy_type, inbound_tags in user.inbounds.items():
+        if proxy_type.account_model is None:
+            if proxy_type.value == 'hysteria2':
+                has_hysteria2 = True
+            continue
+
         for inbound_tag in inbound_tags:
             inbound = xray.config.inbounds_by_tag.get(inbound_tag, {})
 
@@ -89,23 +130,43 @@ def add_user(dbuser: "DBUser"):
                 if node.connected and node.started:
                     _add_user_to_inbound(node.api, inbound_tag, account)
 
+    if has_hysteria2:
+        _restart_hysteria2_cores(xray.config.include_db_users())
+
 
 def remove_user(dbuser: "DBUser"):
     email = f"{dbuser.id}.{dbuser.username}"
 
+    # check hysteria2 before iterating inbounds
+    user = UserResponse.model_validate(dbuser)
+    has_hysteria2 = 'hysteria2' in {pt.value for pt in user.inbounds}
+
     for inbound_tag in xray.config.inbounds_by_tag:
+        # skip hysteria2 inbounds — handled by core restart
+        if xray.config.inbounds_by_tag[inbound_tag].get('protocol') == 'hysteria2':
+            continue
         _remove_user_from_inbound(xray.api, inbound_tag, email)
         for node in list(xray.nodes.values()):
             if node.connected and node.started:
                 _remove_user_from_inbound(node.api, inbound_tag, email)
 
+    if has_hysteria2:
+        _restart_hysteria2_cores(xray.config.include_db_users())
+
 
 def update_user(dbuser: "DBUser"):
     user = UserResponse.model_validate(dbuser)
     email = f"{dbuser.id}.{dbuser.username}"
+    has_hysteria2 = False
 
     active_inbounds = []
     for proxy_type, inbound_tags in user.inbounds.items():
+        if proxy_type.account_model is None:
+            if proxy_type.value == 'hysteria2':
+                has_hysteria2 = True
+            active_inbounds.extend(inbound_tags)
+            continue
+
         for inbound_tag in inbound_tags:
             active_inbounds.append(inbound_tag)
             inbound = xray.config.inbounds_by_tag.get(inbound_tag, {})
@@ -138,11 +199,17 @@ def update_user(dbuser: "DBUser"):
     for inbound_tag in xray.config.inbounds_by_tag:
         if inbound_tag in active_inbounds:
             continue
+        # skip hysteria2 inbounds — handled by core restart
+        if xray.config.inbounds_by_tag[inbound_tag].get('protocol') == 'hysteria2':
+            continue
         # remove disabled inbounds
         _remove_user_from_inbound(xray.api, inbound_tag, email)
         for node in list(xray.nodes.values()):
             if node.connected and node.started:
                 _remove_user_from_inbound(node.api, inbound_tag, email)
+
+    if has_hysteria2:
+        _restart_hysteria2_cores(xray.config.include_db_users())
 
 
 def remove_node(node_id: int):

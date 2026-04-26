@@ -249,8 +249,22 @@ def process_inbounds_and_tags(
             _inbounds.append((protocol, [tag]))
     index_dict = {proxy: index for index, proxy in enumerate(
         xray.config.inbounds_by_tag.keys())}
-    inbounds = sorted(
+    _inbounds = sorted(
         _inbounds, key=lambda x: index_dict.get(x[1][0], float('inf')))
+
+    # shuffle within each protocol group for load distribution
+    shuffled = []
+    i = 0
+    while i < len(_inbounds):
+        protocol = _inbounds[i][0]
+        j = i
+        while j < len(_inbounds) and _inbounds[j][0] == protocol:
+            j += 1
+        group = _inbounds[i:j]
+        random.shuffle(group)
+        shuffled.extend(group)
+        i = j
+    inbounds = shuffled
 
     for protocol, tags in inbounds:
         settings = proxies.get(protocol)

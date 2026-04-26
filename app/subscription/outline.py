@@ -28,14 +28,21 @@ class OutlineConfiguration:
         return config
 
     def add(self, remark: str, address: str, inbound: dict, settings: dict):
-        if inbound["protocol"] != "shadowsocks":
-            return
+        if inbound["protocol"] == "shadowsocks":
+            outbound = self.make_outbound(
+                remark=remark,
+                address=address,
+                port=inbound["port"],
+                password=settings["password"],
+                method=settings["method"],
+            )
+            self.add_directly(outbound)
 
-        outbound = self.make_outbound(
-            remark=remark,
-            address=address,
-            port=inbound["port"],
-            password=settings["password"],
-            method=settings["method"],
-        )
-        self.add_directly(outbound)
+        elif inbound["protocol"] == "hysteria2":
+            self.add_directly({
+                "server": address,
+                "server_port": inbound["port"],
+                "password": settings["password"],
+                "method": "hysteria2",
+                "tag": remark,
+            })

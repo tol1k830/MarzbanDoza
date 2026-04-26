@@ -155,6 +155,16 @@ class V2rayShareLink(str):
                 password=settings["password"],
                 method=settings["method"],
             )
+
+        elif inbound["protocol"] == "hysteria2":
+            link = self.hysteria2(
+                remark=remark,
+                address=address,
+                port=inbound["port"],
+                password=settings["password"],
+                sni=inbound.get("sni", []),
+                ais=inbound.get("ais", False),
+            )
         else:
             return
 
@@ -483,6 +493,28 @@ class V2rayShareLink(str):
             + base64.b64encode(f"{method}:{password}".encode()).decode()
             + f"@{address}:{port}#{urlparse.quote(remark)}"
         )
+
+    @classmethod
+    def hysteria2(
+            cls,
+            remark: str,
+            address: str,
+            port: int,
+            password: str,
+            sni: list = None,
+            ais: bool = False,
+    ):
+        params = {}
+        if sni:
+            params["sni"] = sni[0] if isinstance(sni, list) else sni
+        if ais:
+            params["insecure"] = "1"
+        query = urlparse.urlencode(params) if params else ""
+        url = f"hy2://{urlparse.quote(password, safe='')}@{address}:{port}"
+        if query:
+            url += f"?{query}"
+        url += f"#{urlparse.quote(remark)}"
+        return url
 
 
 class V2rayJsonConfig(str):
